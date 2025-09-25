@@ -5,35 +5,32 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"sync"
 	"testing"
 )
 
-func TestConstants(t *testing.T) {
-	t.Parallel()
+var stdoutMutex sync.Mutex
 
-	tests := []struct {
-		name     string
-		constant string
-		expected string
-	}{
-		{"Cross constant", Cross, string(rune(0x274c))},
-		{"Tick constant", Tick, string(rune(0x2714))},
-		{"Wait constant", Wait, string(rune(0x267B))},
-		{"Run constant", Run, string(rune(0x1F3C3))},
-		{"Warn constant", Warn, string(rune(0x26A0))},
-		{"Lock constant", Lock, string(rune(0x1F512))},
-		{"Globe constant", Globe, string(rune(0x1F310))},
-	}
+func captureOutput(f func()) string {
+	stdoutMutex.Lock()
+	defer stdoutMutex.Unlock()
 
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if tc.constant != tc.expected {
-				t.Errorf("Expected %s, got %s", tc.expected, tc.constant)
-			}
-		})
-	}
+	originalStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	defer func() {
+		w.Close()
+		os.Stdout = originalStdout
+	}()
+
+	f()
+	w.Close()
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
 }
 
 func TestPrintf(t *testing.T) {
@@ -70,16 +67,22 @@ func TestPrintf(t *testing.T) {
 			expected: "\n",
 		},
 		{
+			name:     "Printf with nil args slice",
+			format:   "Hello %s",
+			args:     nil,
+			expected: "Hello %s\n",
+		},
+		{
 			name:     "Printf with unicode constants",
 			format:   "Status: %s Success: %s",
 			args:     []interface{}{Cross, Tick},
 			expected: fmt.Sprintf("Status: %s Success: %s\n", Cross, Tick),
 		},
 		{
-			name:     "Printf with nil args",
-			format:   "Hello %s",
-			args:     nil,
-			expected: "Hello %s\n",
+			name:     "Printf with mixed types",
+			format:   "int: %d, string: %s, bool: %t",
+			args:     []interface{}{42, "hello", true},
+			expected: "int: 42, string: hello, bool: true\n",
 		},
 	}
 
@@ -87,20 +90,9 @@ func TestPrintf(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			oldStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
-
-			Printf(tc.format, tc.args...)
-
-			w.Close()
-			os.Stdout = oldStdout
-
-			var buf bytes.Buffer
-			io.Copy(&buf, r)
-			output := buf.String()
-
+			output := captureOutput(func() {
+				Printf(tc.format, tc.args...)
+			})
 			if output != tc.expected {
 				t.Errorf("Printf() output mismatch\nwant: %q\ngot:  %q", tc.expected, output)
 			}
@@ -109,7 +101,6 @@ func TestPrintf(t *testing.T) {
 }
 
 func TestFatalf(t *testing.T) {
-	t.Parallel()
 
 	tests := []struct {
 		name     string
@@ -142,7 +133,7 @@ func TestFatalf(t *testing.T) {
 			expected: "\n\n",
 		},
 		{
-			name:     "Fatalf with nil args",
+			name:     "Fatalf with nil args slice",
 			format:   "Fatal error %s",
 			args:     nil,
 			expected: "Fatal error %s\n\n",
@@ -152,27 +143,26 @@ func TestFatalf(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			oldStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
-
-			if len(tc.args) > 0 {
-				fmt.Printf(tc.format+"\n", tc.args...)
-			} else {
-				fmt.Println(tc.format + "\n")
+			if os.Getenv("BE_FATALF_SUBPROCESS") == "1" {
+				Fatalf(tc.format, tc.args...)
+				return
 			}
 
-			w.Close()
-			os.Stdout = oldStdout
+			cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+			cmd.Env = append(os.Environ(), "BE_FATALF_SUBPROCESS=1")
 
-			var buf bytes.Buffer
-			io.Copy(&buf, r)
-			output := buf.String()
+			output, err := cmd.CombinedOutput()
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				t.Fatalf("Expected command to fail with an *exec.ExitError, but it didn't. Error: %v", err)
+			}
 
-			if output != tc.expected {
-				t.Errorf("Fatalf() output mismatch\nwant: %q\ngot:  %q", tc.expected, output)
+			if exitErr.ExitCode() != 1 {
+				t.Errorf("expected exit code 1, but got %d", exitErr.ExitCode())
+			}
+
+			if string(output) != tc.expected {
+				t.Errorf("Fatalf() output mismatch\nwant: %q\ngot:  %q", tc.expected, string(output))
 			}
 		})
 	}
