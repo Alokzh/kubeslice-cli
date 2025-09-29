@@ -26,27 +26,28 @@ func mergeMaps(dest, src map[interface{}]interface{}) map[interface{}]interface{
 
 func generateValuesFile(filePath string, hc *HelmChart, defaults string) error {
 	valuesMap := make(map[interface{}]interface{})
-	for k, v := range hc.Values {
-		keys := strings.Split(k, ".")
-		currentMap := valuesMap
-		for i, key := range keys {
-			if i == len(keys)-1 {
-				currentMap[key] = v
-			} else {
-				if currentMap[key] == nil {
-					currentMap[key] = make(map[interface{}]interface{})
+	if hc != nil {
+		for k, v := range hc.Values {
+			keys := strings.Split(k, ".")
+			currentMap := valuesMap
+			for i, key := range keys {
+				if i == len(keys)-1 {
+					currentMap[key] = v
+				} else {
+					if currentMap[key] == nil {
+						currentMap[key] = make(map[interface{}]interface{})
+					}
+					currentMap = currentMap[key].(map[interface{}]interface{})
 				}
-				currentMap = currentMap[key].(map[interface{}]interface{})
 			}
 		}
 	}
-
 	defaultsMap := make(map[interface{}]interface{})
 	if err := yaml.Unmarshal([]byte(defaults), &defaultsMap); err != nil {
 		return fmt.Errorf("error parsing defaults: %v", err)
 	}
 
-	mergedMap := mergeMaps(valuesMap, defaultsMap)
+	mergedMap := mergeMaps(defaultsMap, valuesMap)
 
 	finalData, err := yaml.Marshal(mergedMap)
 	if err != nil {
