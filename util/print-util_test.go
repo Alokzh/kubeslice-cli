@@ -7,10 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sync"
 	"testing"
 )
 
+var stdoutMutex sync.Mutex
+
 func captureOutput(t *testing.T, f func()) string {
+	t.Helper()
+	stdoutMutex.Lock()
+	defer stdoutMutex.Unlock()
+
 	originalStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -19,7 +26,6 @@ func captureOutput(t *testing.T, f func()) string {
 	os.Stdout = w
 
 	defer func() {
-		w.Close()
 		os.Stdout = originalStdout
 	}()
 
@@ -34,6 +40,7 @@ func captureOutput(t *testing.T, f func()) string {
 }
 
 func TestPrintf(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		format   string
@@ -87,6 +94,7 @@ func TestPrintf(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			output := captureOutput(t, func() {
 				Printf(tc.format, tc.args...)
 			})
