@@ -6,18 +6,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync"
+	"regexp"
 	"testing"
 )
 
-var stdoutMutex sync.Mutex
-
-func captureOutput(f func()) string {
-	stdoutMutex.Lock()
-	defer stdoutMutex.Unlock()
-
+func captureOutput(t *testing.T, f func()) string {
 	originalStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Failed to create os.Pipe: %v", err)
+	}
 	os.Stdout = w
 
 	defer func() {
@@ -29,13 +27,13 @@ func captureOutput(f func()) string {
 	w.Close()
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("Failed to copy output from pipe: %v", err)
+	}
 	return buf.String()
 }
 
 func TestPrintf(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
 		name     string
 		format   string
@@ -89,8 +87,7 @@ func TestPrintf(t *testing.T) {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			output := captureOutput(func() {
+			output := captureOutput(t, func() {
 				Printf(tc.format, tc.args...)
 			})
 			if output != tc.expected {
@@ -148,7 +145,8 @@ func TestFatalf(t *testing.T) {
 				return
 			}
 
-			cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+			escapedTestName := regexp.QuoteMeta(t.Name())
+			cmd := exec.Command(os.Args[0], "-test.run=^"+escapedTestName+"$")
 			cmd.Env = append(os.Environ(), "BE_FATALF_SUBPROCESS=1")
 
 			output, err := cmd.CombinedOutput()
