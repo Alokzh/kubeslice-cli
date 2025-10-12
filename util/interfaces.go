@@ -40,3 +40,13 @@ type Clock interface {
 	Sleep(d time.Duration)
 	Now() time.Time
 }
+
+// Sleep pauses execution for the given duration using the global clock.
+func Sleep(d time.Duration) {
+	SystemClock.Sleep(d)
+}
+
+// Now returns the current time using the global clock.
+func Now() time.Time {
+	return SystemClock.Now()
+}
