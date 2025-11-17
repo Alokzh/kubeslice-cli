@@ -4,9 +4,7 @@
 package internal
 
 import (
-	"bytes"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -16,10 +14,9 @@ import (
 )
 
 func TestCreateKindClustersIntegration(t *testing.T) {
-	if !isKindAvailable(t) {
+	if !isBinaryAvailable(t, "kind") {
 		t.SkipNow()
 	}
-
 	tests := []struct {
 		name         string
 		config       *ConfigurationSpecs
@@ -78,22 +75,17 @@ name: ` + name
 			}
 
 			CreateKindClusters(tt.config)
-
-			require.Empty(t, fakeOutput.FatalCalls,
-				"CreateKindClusters should not have called Fatalf. Errors: %v",
-				fakeOutput.FatalCalls)
-
+			require.Empty(t, fakeOutput.FatalCalls)
 			existingClusters := getKindClusterList(t)
 			for _, name := range tt.clusterNames {
-				assert.Contains(t, existingClusters, name,
-					"Cluster %s should exist after creation", name)
+				assert.Contains(t, existingClusters, name)
 			}
 		})
 	}
 }
 
 func TestCreateKindClustersIdempotencyIntegration(t *testing.T) {
-	if !isKindAvailable(t) {
+	if !isBinaryAvailable(t, "kind") {
 		t.SkipNow()
 	}
 
@@ -139,7 +131,7 @@ name: ` + clusterName
 }
 
 func TestDeleteKindClustersIntegration(t *testing.T) {
-	if !isKindAvailable(t) {
+	if !isBinaryAvailable(t, "kind") {
 		t.SkipNow()
 	}
 
@@ -169,11 +161,7 @@ func TestDeleteKindClustersIntegration(t *testing.T) {
 		})
 
 		DeleteKindClusters(config)
-
-		require.Empty(t, fakeOutput.FatalCalls,
-			"DeleteKindClusters should not have called Fatalf. Errors: %v",
-			fakeOutput.FatalCalls)
-
+		require.Empty(t, fakeOutput.FatalCalls)
 		existingAfter := getKindClusterList(t)
 		for _, name := range clusterNames {
 			assert.NotContains(t, existingAfter, name)
@@ -234,75 +222,4 @@ func TestSetKubeConfigPathIntegration(t *testing.T) {
 	SetKubeConfigPath()
 
 	assert.Equal(t, KubeconfigPath, os.Getenv("KUBECONFIG"))
-}
-
-func isKindAvailable(t *testing.T) bool {
-	t.Helper()
-	path, err := exec.LookPath("kind")
-	if err != nil {
-		t.Logf("Skipping: kind binary not found in PATH")
-		return false
-	}
-	if util.ExecutablePaths == nil {
-		util.ExecutablePaths = make(map[string]string)
-	}
-	util.ExecutablePaths["kind"] = path
-	return true
-}
-
-func getKindClusterList(t *testing.T) []string {
-	t.Helper()
-	cmd := exec.Command(util.ExecutablePaths["kind"], "get", "clusters")
-	var outB bytes.Buffer
-	cmd.Stdout = &outB
-	cmd.Stderr = &outB
-	err := cmd.Run()
-	if err != nil {
-		t.Logf("Warning: kind get clusters returned error: %v", err)
-	}
-
-	clusters := []string{}
-	for _, line := range strings.Split(outB.String(), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			clusters = append(clusters, line)
-		}
-	}
-	return clusters
-}
-
-func createTestKindClusters(t *testing.T, clusterNames []string) {
-	t.Helper()
-	for _, name := range clusterNames {
-		cmd := exec.Command(util.ExecutablePaths["kind"], "create", "cluster", "--name", name)
-		if err := cmd.Run(); err != nil {
-			cleanupKindClusters(t, clusterNames)
-			t.Fatalf("Failed to create test cluster %s: %v", name, err)
-		}
-	}
-}
-
-func cleanupKindClusters(t *testing.T, clusterNames []string) {
-	t.Helper()
-	existingClusters := getKindClusterList(t)
-	clustersToDelete := []string{}
-
-	for _, name := range clusterNames {
-		for _, existing := range existingClusters {
-			if existing == name {
-				clustersToDelete = append(clustersToDelete, name)
-				break
-			}
-		}
-	}
-
-	if len(clustersToDelete) == 0 {
-		return
-	}
-
-	args := append([]string{"delete", "clusters"}, clustersToDelete...)
-	cmd := exec.Command(util.ExecutablePaths["kind"], args...)
-	if err := cmd.Run(); err != nil {
-		t.Logf("Warning: Failed to cleanup: %v", err)
-	}
 }

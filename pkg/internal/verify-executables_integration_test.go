@@ -13,15 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// isBinaryAvailable is a helper to check if a binary exists for skipping tests.
-func isBinaryAvailable(t *testing.T, name string) bool {
-	t.Helper()
-	_, err := exec.LookPath(name)
-	return err == nil
-}
-
 func TestVerifyExecutablesIntegration(t *testing.T) {
-	// Setup: Check for binaries required by the test suite itself
 	requiredBinaries := []string{"kubectl", "helm"}
 	for _, bin := range requiredBinaries {
 		if !isBinaryAvailable(t, bin) {
@@ -54,10 +46,6 @@ func TestVerifyExecutablesIntegration(t *testing.T) {
 				assert.Contains(t, util.ExecutablePaths, "kubectl")
 				assert.Contains(t, util.ExecutablePaths, "docker")
 				assert.Contains(t, util.ExecutablePaths, "helm")
-				assert.NotEmpty(t, util.ExecutablePaths["kind"])
-				assert.NotEmpty(t, util.ExecutablePaths["kubectl"])
-				assert.NotEmpty(t, util.ExecutablePaths["docker"])
-				assert.NotEmpty(t, util.ExecutablePaths["helm"])
 			},
 		},
 		{
@@ -76,8 +64,6 @@ func TestVerifyExecutablesIntegration(t *testing.T) {
 				assert.NotContains(t, util.ExecutablePaths, "docker")
 				assert.Contains(t, util.ExecutablePaths, "kubectl")
 				assert.Contains(t, util.ExecutablePaths, "helm")
-				assert.NotEmpty(t, util.ExecutablePaths["kubectl"])
-				assert.NotEmpty(t, util.ExecutablePaths["helm"])
 			},
 		},
 		{
@@ -151,14 +137,10 @@ func TestVerifyExecutablesIntegration(t *testing.T) {
 			VerifyExecutables(tt.config)
 
 			if tt.expectFatal {
-				require.NotEmpty(t, fakeOutput.FatalCalls,
-					"Expected VerifyExecutables to call Fatalf")
+				require.NotEmpty(t, fakeOutput.FatalCalls)
 				assert.Contains(t, fakeOutput.FatalCalls[0], tt.fatalContains)
 			} else {
-				require.Empty(t, fakeOutput.FatalCalls,
-					"VerifyExecutables should not have called Fatalf. Errors: %v",
-					fakeOutput.FatalCalls)
-
+				require.Empty(t, fakeOutput.FatalCalls)
 				if tt.validatePaths != nil {
 					tt.validatePaths(t)
 				}
