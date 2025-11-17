@@ -11,14 +11,12 @@ import (
 
 	"github.com/kubeslice/kubeslice-cli/util"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestHelmRepoAddIntegration verifies that AddHelmCharts can successfully communicate with the real helm binary while safely handling any util.Fatalf calls.
 func TestHelmRepoAddIntegration(t *testing.T) {
 	helmPath, available := isHelmAvailable(t)
-	if !available {
-		t.Skip("Skipping: helm binary not found in PATH")
-	}
+	require.True(t, available, "helm binary not found in PATH")
 
 	if util.ExecutablePaths == nil {
 		util.ExecutablePaths = make(map[string]string)
@@ -29,6 +27,7 @@ func TestHelmRepoAddIntegration(t *testing.T) {
 		name           string
 		config         *ConfigurationSpecs
 		skipCleanup    bool
+		expectFatal    bool
 		validateResult func(*testing.T, string)
 	}{
 		{
@@ -36,17 +35,18 @@ func TestHelmRepoAddIntegration(t *testing.T) {
 			config: &ConfigurationSpecs{
 				Configuration: Configuration{
 					HelmChartConfiguration: HelmChartConfiguration{
-						RepoAlias: "kubeslice-itest-1",
+						RepoAlias: "kubeslice-itest-success",
 						RepoUrl:   "https://kubeslice.github.io/kubeslice/",
 						UseLocal:  false,
 					},
 				},
 			},
+			expectFatal: false,
 			validateResult: func(t *testing.T, repoAlias string) {
 				output := getHelmRepoList(t)
-				assert.Contains(t, output, repoAlias,
+				require.Contains(t, output, repoAlias,
 					"helm repo list should contain the added repository")
-				assert.Contains(t, output, "https://kubeslice.github.io/kubeslice/",
+				require.Contains(t, output, "https://kubeslice.github.io/kubeslice/",
 					"helm repo list should contain the correct URL")
 			},
 		},
@@ -55,17 +55,37 @@ func TestHelmRepoAddIntegration(t *testing.T) {
 			config: &ConfigurationSpecs{
 				Configuration: Configuration{
 					HelmChartConfiguration: HelmChartConfiguration{
-						RepoAlias: "should-not-be-added",
+						RepoAlias: "kubeslice-itest-skip",
 						RepoUrl:   "https://example.com/charts",
 						UseLocal:  true,
 					},
 				},
 			},
 			skipCleanup: true,
+			expectFatal: false,
 			validateResult: func(t *testing.T, repoAlias string) {
 				output := getHelmRepoList(t)
-				assert.NotContains(t, output, repoAlias,
+				require.NotContains(t, output, repoAlias,
 					"Repository should not be added when UseLocal is true")
+			},
+		},
+		{
+			name: "Fails to add non-existent repository",
+			config: &ConfigurationSpecs{
+				Configuration: Configuration{
+					HelmChartConfiguration: HelmChartConfiguration{
+						RepoAlias: "kubeslice-itest-fail",
+						RepoUrl:   "https://non-existent-repo-12345.example.com/charts",
+						UseLocal:  false,
+					},
+				},
+			},
+			skipCleanup: true,
+			expectFatal: true,
+			validateResult: func(t *testing.T, repoAlias string) {
+				output := getHelmRepoList(t)
+				require.NotContains(t, output, repoAlias,
+					"Failed test should not add the repository")
 			},
 		},
 	}
@@ -75,10 +95,8 @@ func TestHelmRepoAddIntegration(t *testing.T) {
 			repoAlias := tt.config.Configuration.HelmChartConfiguration.RepoAlias
 
 			originalExecutor := util.CommandExecutor
-
 			cleanupEnv := util.NewTestEnvironment()
 			util.CommandExecutor = originalExecutor
-
 			fakeOutput := util.Output.(*util.FakeOutput)
 			defer cleanupEnv()
 
@@ -90,8 +108,14 @@ func TestHelmRepoAddIntegration(t *testing.T) {
 
 			AddHelmCharts(tt.config)
 
-			assert.Empty(t, fakeOutput.FatalCalls,
-				"AddHelmCharts should not have called Fatalf. Errors: %v", fakeOutput.FatalCalls)
+			if tt.expectFatal {
+				require.NotEmpty(t, fakeOutput.FatalCalls,
+					"Expected AddHelmCharts to call Fatalf for failed repo add")
+				assert.Contains(t, fakeOutput.FatalCalls[0], "Process failed")
+			} else {
+				require.Empty(t, fakeOutput.FatalCalls,
+					"AddHelmCharts should not have called Fatalf. Errors: %v", fakeOutput.FatalCalls)
+			}
 
 			if tt.validateResult != nil {
 				tt.validateResult(t, repoAlias)
@@ -118,7 +142,7 @@ func getHelmRepoList(t *testing.T) string {
 		if strings.Contains(stderr.String(), "no repositories") {
 			return ""
 		}
-		t.Logf("helm repo list returned error: %v, stderr: %s", err, stderr.String())
+		t.Logf("helm repo list error: %v, stderr: %s", err, stderr.String())
 		return ""
 	}
 	return stdout.String()
@@ -128,7 +152,6 @@ func cleanupHelmRepo(t *testing.T, repoAlias string) {
 	t.Helper()
 	output := getHelmRepoList(t)
 	if !strings.Contains(output, repoAlias) {
-		t.Logf("Repository %s not found, skipping cleanup", repoAlias)
 		return
 	}
 
@@ -137,9 +160,6 @@ func cleanupHelmRepo(t *testing.T, repoAlias string) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		t.Logf("Warning: Failed to cleanup helm repo %s: %v, stderr: %s",
-			repoAlias, err, stderr.String())
-	} else {
-		t.Logf("Successfully cleaned up helm repo: %s", repoAlias)
+		t.Logf("Failed to cleanup helm repo %s: %v", repoAlias, err)
 	}
 }
