@@ -34,7 +34,25 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.17'
-      
+
+      # --- Setup Integration Test Dependencies ---
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.11.1'
+
+      - name: Set up Kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      # --- Run Tests ---
       - name: Run All Tests
         run: make test
 
