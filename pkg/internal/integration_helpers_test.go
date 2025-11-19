@@ -5,15 +5,16 @@ package internal
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/kubeslice/kubeslice-cli/util"
+	"github.com/stretchr/testify/require"
 )
 
 // isBinaryAvailable is the helper to check if a binary exists for skipping tests.
-// It also populates the util.ExecutablePaths map, which is critical.
 func isBinaryAvailable(t *testing.T, name string) bool {
 	t.Helper()
 	path, err := exec.LookPath(name)
@@ -139,4 +140,24 @@ func cleanupHelmRepo(t *testing.T, repoAlias string) {
 	if err := cmd.Run(); err != nil {
 		t.Logf("Failed to cleanup helm repo %s: %v", repoAlias, err)
 	}
+}
+
+// setupKubeconfigForCluster configures kubectl to talk to the Kind cluster
+func setupKubeconfigForCluster(t *testing.T, clusterName string) {
+	t.Helper()
+
+	util.CreateDirectoryPath(kubesliceDirectory)
+	CreateKubeConfig()
+	SetKubeConfigPath()
+
+	if !isBinaryAvailable(t, "kind") {
+		t.FailNow()
+	}
+
+	cmd := exec.Command(util.ExecutablePaths["kind"], "get", "kubeconfig", "--name", clusterName)
+	kubeconfigBytes, err := cmd.Output()
+	require.NoError(t, err, "Failed to get kubeconfig from kind")
+
+	err = os.WriteFile(KubeconfigPath, kubeconfigBytes, 0644)
+	require.NoError(t, err, "Failed to write real kubeconfig to test file")
 }
